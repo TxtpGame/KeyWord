@@ -19,7 +19,7 @@ namespace unicode
         3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6
     };
 
-    inline unsigned get_utf8_bytes(UTF8 first)
+    inline unsigned int get_utf8_bytes(UTF8 first)
     {
         return BytesForUTF8[first];
     }
@@ -101,7 +101,7 @@ namespace unicode
         return index;
     }
 
-    inline  int unicode_to_utf8_one(UNIC unic, UTF8 *utf8_buf, int utf8_buf_size)
+    inline int unicode_to_utf8_one(UNIC unic, UTF8 *utf8_buf, int utf8_buf_size)
     {
         if (unic <= 0x7F)  // * U-00 - U-7F:  0xxxxxxx
         {

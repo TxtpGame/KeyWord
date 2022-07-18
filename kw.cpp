@@ -8,7 +8,8 @@
 #include <vector>
 #include <set>
 #include <map>
-#include<algorithm>
+#include <algorithm>
+#include <ctype.h>
 #include "unicode.hpp"
 using namespace unicode;
 using namespace std;
@@ -34,7 +35,7 @@ struct KeyWordsItem
                 return unic_words[i] < other.unic_words[i];
             }
         }
-        return unic_len < other.unic_len;
+        return unic_len > other.unic_len;
     }
 };
 
@@ -115,17 +116,21 @@ void sort_key_words_index()
     }
 
     int n = g_KeyWords.size();
+    if (n == 0)
+    {
+        return;
+    }
 
     UNIC t = g_KeyWords[0].unic_words[0];
     UNIC c = t;
     g_UnicIndex[c].start = 0;
-    int vn = 1;
+    int group = 1;
     for (int i = 1; i < n; i++)
     {
         t = g_KeyWords[i].unic_words[0];
         if (c != t)
         {
-            vn++;
+            group++;
             g_UnicIndex[c].end = i;
             g_UnicIndex[t].start = i;
             c = t;
@@ -133,7 +138,21 @@ void sort_key_words_index()
     }
     g_UnicIndex[c].end = n;
 
-    printf("vn = %d\n", vn);
+    printf("group = %d\n", group);
+}
+
+bool isSkipChar(UNIC unic)
+{
+    if (unic > 0x7F)
+    {
+        return false;
+    }
+
+    if (isalpha(unic))
+    {
+        return false;
+    }
+    return true;
 }
 
 int kw::init(const char *kw_file)
@@ -193,30 +212,49 @@ int kw::check(const char *msg, char *hint)
         int end = unicindex->second.end;;
         for (int j = start; j < end; j++)
         {
-            if ((unic_len - index) >= g_KeyWords[j].unic_len)
+            int key_len = g_KeyWords[j].unic_len;
+            if ((unic_len - index) < key_len)
             {
-                bool bFind = true;
-                for (int k = 0; k < g_KeyWords[j].unic_len; k++)
+                continue;
+            }
+
+            int macth_len = 0;
+            int skip_len = 0;
+            for (int k = 0; k < g_KeyWords[j].unic_len; k++)
+            {
+                int i = index + macth_len + skip_len;
+                while (i < unic_len)
                 {
-                    if (unic[index + k] != g_KeyWords[j].unic_words[k])
+                    if (isSkipChar(unic[i]))
                     {
-                        bFind = false;
-                        break;
+                        i++;
+                        continue;
                     }
+                    break;
                 }
-                if (bFind)
+                if (i == unic_len)
                 {
-                    sprintf(hint, "%s", g_KeyWords[j].u8_words);
-                    return -1;
+                    break;
                 }
+
+                if (unic[i] != g_KeyWords[j].unic_words[k])
+                {
+                    break;
+                }
+                macth_len++;
+            }
+            if (macth_len == key_len)
+            {
+                sprintf(hint, "%s", g_KeyWords[j].u8_words);
+                return -1;
             }
         }
-
         index++;
     }
     return 0;
 }
 
+// 中文规则
 int kw::hexie(char *msg)
 {
     int msg_len = strlen(msg);
@@ -225,14 +263,16 @@ int kw::hexie(char *msg)
         return -1;
     }
 
+    UNIC unic_old[MAX_MSG_LEN] = { 0 };
     UNIC unic[MAX_MSG_LEN] = { 0 };
     UTF8 utf8[MAX_MSG_LEN] = { 0 };
-    UNIC unictemp[MAX_MSG_LEN] = { 0 };
+    UNIC unic_new[MAX_MSG_LEN] = { 0 };
     memcpy(utf8, msg, msg_len * sizeof(UTF8));
 
-    int u8_len = remove_space((char *)&utf8, msg_len);
 
+    int u8_len = msg_len;
     int unic_len = utf8_to_unicode(utf8, u8_len, unic, MAX_MSG_LEN);
+    memcpy(unic_old, unic, MAX_MSG_LEN * sizeof(UNIC));
     make_lower(unic, unic_len);
     int index = 0;
     int tempIndex = 0;
@@ -240,53 +280,78 @@ int kw::hexie(char *msg)
     while (index < unic_len)
     {
         UNIC c = unic[index];
-        int keyLen = 0;
-        auto unicindex = g_UnicIndex.find(c);
-        if (unicindex != g_UnicIndex.end())
-        {
-            int start = unicindex->second.start;
-            int end = unicindex->second.end;;
+        UNIC c_old = unic_old[index];// 记录下原始字符
 
-            for (int j = start; j < end; j++)
+        auto unicindex = g_UnicIndex.find(c);
+        if (unicindex == g_UnicIndex.end())
+        {
+            unic_new[tempIndex] = c_old;
+            index++;
+            tempIndex++;
+            continue;
+        }
+
+        int start = unicindex->second.start;
+        int end = unicindex->second.end;
+        int macth_len = 0;
+        int skip_len = 0;
+        bool find = false;
+        for (int j = start; j < end; j++)
+        {
+            int key_len = g_KeyWords[j].unic_len;
+            if ((unic_len - index) < key_len)
             {
-                if ((unic_len - index) >= g_KeyWords[j].unic_len)
+                continue;
+            }
+
+            macth_len = 0;
+            skip_len = 0;
+            for (int k = 0; k < g_KeyWords[j].unic_len; k++)
+            {
+                int i = index + macth_len + skip_len;
+                while (i < unic_len)
                 {
-                    bool bFind = true;
-                    for (int k = 0; k < g_KeyWords[j].unic_len; k++)
+                    if (isSkipChar(unic[i]))
                     {
-                        if (unic[index + k] != g_KeyWords[j].unic_words[k])
-                        {
-                            bFind = false;
-                            break;
-                        }
+                        i++;
+                        skip_len++;
+                        continue;
                     }
-                    if (bFind)
-                    {
-                        unictemp[tempIndex] = '*';
-                        keyLen = g_KeyWords[j].unic_len;
-                        break;
-                    }
+                    break;
                 }
+                if (i == unic_len || (unic[i] != g_KeyWords[j].unic_words[k]))
+                {
+                    break;
+                }
+                macth_len++;
+            }
+            if (macth_len == key_len)
+            {
+                for (int i = 0; i < macth_len + skip_len; i++)
+                {
+                    unic_new[tempIndex + i] = '*';
+                }
+                find = true;
+                break;
             }
         }
-        if (keyLen > 0)
+        if (find)
         {
             bb = true;
-            index += keyLen;
-            tempIndex += 1;
+            index += macth_len + skip_len;
+            tempIndex += macth_len + skip_len;
         }
         else
         {
-            unictemp[tempIndex] = c;
+            unic_new[tempIndex] = c_old;
             index++;
             tempIndex++;
         }
     }
     if (bb)
     {
-        unicode_to_utf8(unictemp, tempIndex, (UTF8 *)msg, msg_len);
+        unicode_to_utf8(unic_new, tempIndex, (UTF8 *)msg, msg_len);
         return -1;
-
     }
     return 0;
 }
